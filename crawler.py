@@ -3,42 +3,38 @@ import requests
 import sys
 import os
 import time
-import re
+import json
 from bs4 import BeautifulSoup
 
 # ============================================
-# 优先爬取 hanchacha.com 的课文资料
-# 智能填充模板的所有板块
+# 使用 DeepSeek 免费 API 生成结构化笔记
+# DeepSeek 官网：https://platform.deepseek.com/
+# 注册后可获得免费 API Key
 # ============================================
+
+# 你的 DeepSeek API Key（需要注册获取，免费）
+# 注册地址：https://platform.deepseek.com/
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+
+# 如果没有 API Key，也可以使用备用方案（模板填充）
+USE_AI = True  # 设为 False 可关闭 AI
 
 def crawl_hanchacha(lesson_name):
     """从 hanchacha.com 爬取所有相关资料"""
     print(f"  🔍 正在从 hanchacha.com 搜索《{lesson_name}》...")
     
-    result = {
-        "content": "",       # 课文内容
-        "knowledge": "",     # 知识点
-        "notes": "",         # 课堂笔记
-        "structure": "",     # 文章结构
-        "writing": "",       # 写作手法
-        "words": "",         # 词语积累
-        "sentences": "",     # 重点句子
-        "exercises": "",     # 课后练习
-        "summary": ""        # 中心思想
-    }
-    
+    all_text = ""
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
     
     try:
-        # 方法1：直接搜索
+        # 搜索
         search_url = f"https://hanchacha.com/?s={lesson_name}"
-        print(f"    搜索: {search_url}")
         response = requests.get(search_url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 查找所有相关链接
+        # 查找相关链接
         links = soup.find_all('a', href=True)
         found_urls = []
         
@@ -51,178 +47,232 @@ def crawl_hanchacha(lesson_name):
         
         print(f"    找到 {len(found_urls)} 个相关页面")
         
-        # 访问每个页面提取内容
-        for url in found_urls[:5]:
+        # 提取所有页面内容
+        for url in found_urls[:3]:
             try:
-                print(f"    正在提取: {url}")
                 page_resp = requests.get(url, headers=headers, timeout=10)
                 page_soup = BeautifulSoup(page_resp.text, 'html.parser')
-                
-                # 提取主要内容
-                content_div = page_soup.find('article') or page_soup.find('div', class_='entry-content') or page_soup.find('div', class_='post-content')
+                content_div = page_soup.find('article') or page_soup.find('div', class_='entry-content')
                 
                 if content_div:
-                    full_text = content_div.get_text(strip=True)
-                    title = page_soup.find('title')
-                    title_text = title.get_text() if title else ""
-                    
-                    # 根据页面标题分类存储
-                    if '知识点' in title_text or '知识梳理' in title_text:
-                        result["knowledge"] = extract_smart_content(full_text, 2000)
-                    elif '课堂笔记' in title_text or '笔记' in title_text:
-                        result["notes"] = extract_smart_content(full_text, 2000)
-                    elif '结构' in title_text or '层次' in title_text:
-                        result["structure"] = extract_smart_content(full_text, 1500)
-                    elif '写作' in title_text or '手法' in title_text:
-                        result["writing"] = extract_smart_content(full_text, 1500)
-                    elif '词语' in title_text or '字词' in title_text:
-                        result["words"] = extract_smart_content(full_text, 1500)
-                    elif '句子' in title_text or '赏析' in title_text:
-                        result["sentences"] = extract_smart_content(full_text, 1500)
-                    elif '练习' in title_text or '习题' in title_text:
-                        result["exercises"] = extract_smart_content(full_text, 1500)
-                    elif '中心' in title_text or '主旨' in title_text:
-                        result["summary"] = extract_smart_content(full_text, 1000)
-                    else:
-                        # 默认存到内容区
-                        if not result["content"]:
-                            result["content"] = extract_smart_content(full_text, 2000)
-                            
-            except Exception as e:
-                print(f"    提取失败: {e}")
+                    text = content_div.get_text(strip=True)
+                    all_text += f"\n\n---\n{text[:1500]}"
+            except:
+                continue
                 
     except Exception as e:
         print(f"  hanchacha 爬取失败: {e}")
     
-    return result
+    return all_text[:4000]  # 限制长度
 
-def extract_smart_content(text, max_len):
-    """智能提取内容，去除多余空白"""
-    if not text:
-        return ""
-    # 清理文本
-    text = re.sub(r'\s+', ' ', text)
-    text = text.strip()
-    if len(text) > max_len:
-        text = text[:max_len] + "..."
-    return text
+def crawl_other_sites(lesson_name):
+    """爬取其他网站作为补充"""
+    other_text = ""
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    # 百度搜索
+    try:
+        url = f"https://www.baidu.com/s?wd={lesson_name} 课文讲解"
+        response = requests.get(url, headers=headers, timeout=8)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        results = soup.find_all('div', class_='result')
+        for result in results[:2]:
+            text = result.get_text(strip=True)
+            if len(text) > 100:
+                other_text += f"\n\n{text[:800]}"
+    except:
+        pass
+    
+    return other_text[:2000]
 
-def generate_smart_note(lesson_name, data):
-    """智能生成完整的笔记，填充所有板块"""
+def generate_with_ai(lesson_name, raw_materials):
+    """使用 AI 生成完整的学霸笔记"""
     
-    # 如果某个板块为空，根据已有内容智能生成
-    if not data["knowledge"] and data["notes"]:
-        data["knowledge"] = "本文是一篇优秀的课文，" + data["notes"][:200]
-    
-    if not data["structure"]:
-        data["structure"] = """| 部分 | 自然段 | 主要内容 |
-|------|--------|----------|
-| 开头 | 第1段 | 引出主题 |
-| 中间 | 第2-5段 | 具体描写 |
-| 结尾 | 最后一段 | 总结升华 |"""
-    
-    if not data["writing"]:
-        data["writing"] = """本文运用了以下写作手法：
-1. **比喻**：生动形象地描写事物
-2. **拟人**：赋予事物人的情感
-3. **排比**：增强语势，突出情感
-4. **对比**：突出事物特点"""
-    
-    if not data["words"]:
-        data["words"] = """| 类别 | 词语 |
-|------|------|
-| 重点词语 | 请根据课文填写 |
-| 近义词 | 请根据课文填写 |
-| 反义词 | 请根据课文填写 |
-| 四字词语 | 请根据课文填写 |"""
-    
-    if not data["sentences"]:
-        data["sentences"] = """> 请从课文中找出最精彩的句子抄写下来：
-> ________________________________
-> 
-> **我的赏析**：这句话运用了____的修辞手法，生动地写出了____。"""
-    
-    if not data["exercises"]:
-        data["exercises"] = """1. **朗读**：有感情地朗读课文3遍
-2. **背诵**：背诵你最喜欢的段落
-3. **仿写**：模仿课文写法，写一段话
-4. **思考**：读完课文，你有什么感受？"""
-    
-    if not data["summary"]:
-        data["summary"] = f"《{lesson_name}》通过生动的描写，表达了作者的思想感情。"
-    
-    # 生成完整笔记
-    note = f"""# 📖 {lesson_name} · 学霸综合笔记
+    # 你的完整模板
+    template = f"""请根据以下关于《{lesson_name}》的教学资料，生成一份完整的学霸笔记。
 
-> 一份集**知识点、课堂笔记、教学思路**于一体的超实用手册
-> **数据来源**：hanchacha.com 语文同步
-> **生成时间**：{time.strftime('%Y-%m-%d %H:%M:%S')}
+必须严格按照以下模板格式，每个板块都要写满，不能留空：
+
+# 🌊 探秘{lesson_name} · 学霸综合笔记 🐠
+
+> 一份集**知识点、课堂笔记、教学思路**于一体的超实用手册，专治"阅读没方法，写作干巴巴"！
 
 ---
 
 ## 📚 一、课文一瞥：它讲了什么？
 
-{data["content"] if data["content"] else f'《{lesson_name}》是一篇优美的课文，通过生动的描写展现了丰富的内涵。建议查阅教材原文仔细阅读。'}
-
-*   **主要内容**：{data["knowledge"][:100] if data["knowledge"] else '课文从多个角度展开描写。'}
-*   **中心思想**：{data["summary"][:100]}
+（写课文简介、核心问题、主要内容、中心句）
 
 ---
 
 ## 🧱 二、文章结构：总分总，超清晰！
 
-{data["structure"]}
+（用表格形式写出文章的结构，包括部分、自然段、内容、作用）
 
-> 💡 **写作要点：** 文章采用清晰的结构，条理分明，层次清楚。
+> 💡 **写作要点：** （总结结构特点）
 
 ---
 
 ## ✨ 三、阅读与写作：深挖课文"宝藏"
 
-### 📖 知识点梳理
-{data["knowledge"] if data["knowledge"] else '请参考课堂笔记和教材。'}
+### 1. （某方面的写作特点）—— 具体手法
 
-### ✍️ 写作手法分析
-{data["writing"]}
+| 阅读要点 | 写法分析 | 写作小技巧 |
+|----------|----------|------------|
+| ... | ... | ... |
+
+> 💡 **写作要点：** （总结写作方法）
 
 ---
 
 ## 📝 四、语言积累：词语库+句式库
 
-### 重点词语
+### 1. 重点词语
 
-{data["words"]}
+| 类别 | 词语 |
+|------|------|
+| 必会字词 | ... |
+| 近义词 | ... |
+| 反义词 | ... |
+| AABC式 | ... |
 
-### 重点句子赏析
+### 2. 仿写句式
 
-{data["sentences"]}
+> **“句式名称”**
+>
+> *   **课文原句**：...
+> *   **仿写示例**：...
 
 ---
 
 ## 🎯 五、课后挑战：小试牛刀
 
-{data["exercises"]}
+1.  **朗读小能手**：...
+2.  **小小解说员**：...
+3.  **妙笔生花**：...
 
 ---
 
-## 📒 六、课堂笔记
+以下是爬取到的资料，请基于这些内容生成笔记（如果资料不足，可以结合你的知识补充）：
 
-{data["notes"] if data["notes"] else '请记录课堂上的重点内容：\n\n1. \n2. \n3. '}
+{raw_materials}
+
+请直接输出笔记内容，不要输出其他解释。"""
+
+    if USE_AI and DEEPSEEK_API_KEY:
+        try:
+            print("  🤖 正在调用 AI 生成笔记...")
+            response = requests.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "deepseek-chat",
+                    "messages": [
+                        {"role": "system", "content": "你是小学语文教学专家，擅长生成高质量的课文笔记。"},
+                        {"role": "user", "content": template}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 4000
+                },
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                note = result["choices"][0]["message"]["content"]
+                print("  ✅ AI 生成成功")
+                return note
+            else:
+                print(f"  ⚠️ AI 调用失败: {response.status_code}")
+                return generate_template_note(lesson_name, raw_materials)
+                
+        except Exception as e:
+            print(f"  ⚠️ AI 生成失败: {e}")
+            return generate_template_note(lesson_name, raw_materials)
+    else:
+        print("  📝 使用模板生成（未配置 AI）")
+        return generate_template_note(lesson_name, raw_materials)
+
+def generate_template_note(lesson_name, raw_materials):
+    """备用：基于模板生成（不用 AI）"""
+    
+    # 从爬取材料中提取一段作为内容
+    content_preview = raw_materials[:500] if raw_materials else f"《{lesson_name}》是一篇优美的课文。"
+    
+    return f"""# 🌊 探秘{lesson_name} · 学霸综合笔记 🐠
+
+> 一份集**知识点、课堂笔记、教学思路**于一体的超实用手册！
 
 ---
 
-## 💡 七、我的思考
+## 📚 一、课文一瞥：它讲了什么？
 
-通过学习这篇课文，我学到了：________________________________
+{content_preview}
 
-我还想了解：________________________________
+*   **核心问题**：本文的核心思想是什么？
+*   **主要内容**：课文从多个角度展开描写。
+*   **中心句**：文中的点睛之笔值得品味。
 
 ---
 
-*✨ 每天进步一点点！继续加油！* 
-*🔍 数据来源：hanchacha.com 语文同步资源*
+## 🧱 二、文章结构：总分总，超清晰！
+
+| 部分 | 自然段 | 内容 | 作用 |
+|------|--------|------|------|
+| **第一部分** | 1 | 引入主题 | 吸引读者 |
+| **第二部分** | 2-5 | 具体描写 | 展开叙述 |
+| **第三部分** | 6 | 总结升华 | 点明主旨 |
+
+> 💡 **写作要点：** 文章采用清晰的结构，层次分明。
+
+---
+
+## ✨ 三、阅读与写作：深挖课文"宝藏"
+
+### 1. 写作特色分析
+
+| 阅读要点 | 写法分析 | 写作小技巧 |
+|----------|----------|------------|
+| 生动描写 | 运用比喻、拟人等修辞 | 让文章更生动 |
+| 结构清晰 | 总分总结构 | 让读者一目了然 |
+
+> 💡 **写作要点：** 学会运用多种修辞手法。
+
+---
+
+## 📝 四、语言积累：词语库+句式库
+
+### 1. 重点词语
+
+| 类别 | 词语 |
+|------|------|
+| 必会字词 | 请根据课文填写 |
+| 近义词 | 请根据课文填写 |
+| 反义词 | 请根据课文填写 |
+
+### 2. 仿写句式
+
+> **句式示例**
+>
+> *   **课文原句**：请从课文中找出精彩句子
+> *   **仿写示例**：请尝试仿写
+
+---
+
+## 🎯 五、课后挑战：小试牛刀
+
+1.  **朗读小能手**：有感情地朗读课文
+2.  **小小解说员**：向家人介绍课文内容
+3.  **妙笔生花**：运用学到的写法写一段话
+
+---
+
+*✨ 数据来源：hanchacha.com 及网络爬虫*
+*📅 生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}*
 """
-    return note
 
 def main():
     if len(sys.argv) < 2:
@@ -231,22 +281,31 @@ def main():
     
     lesson_name = sys.argv[1]
     print("=" * 55)
-    print(f"🕷️ 正在从 hanchacha.com 爬取《{lesson_name}》完整资料...")
+    print(f"🕷️ 正在为《{lesson_name}》生成学霸笔记...")
     print("=" * 55)
     
-    # 爬取 hanchacha
-    print("\n⭐ [主要来源] hanchacha.com")
-    data = crawl_hanchacha(lesson_name)
+    # 1. 爬取 hanchacha
+    print("\n⭐ [1/2] 爬取 hanchacha.com...")
+    hanchacha_text = crawl_hanchacha(lesson_name)
     
-    # 统计结果
-    filled = sum(1 for v in data.values() if v)
-    print(f"\n📊 爬取统计：共 {filled}/7 个板块有内容")
+    # 2. 爬取其他网站补充
+    print("\n📡 [2/2] 补充其他网站...")
+    other_text = crawl_other_sites(lesson_name)
     
-    # 生成完整笔记
-    print("\n📝 正在生成完整笔记...")
-    note = generate_smart_note(lesson_name, data)
+    # 合并所有资料
+    all_materials = f"""
+【来自 hanchacha.com 的资料】
+{hanchacha_text}
+
+【来自其他网站的资料】
+{other_text}
+"""
     
-    # 保存
+    # 3. 使用 AI 生成笔记
+    print("\n🤖 正在生成学霸笔记...")
+    note = generate_with_ai(lesson_name, all_materials)
+    
+    # 4. 保存
     os.makedirs('data', exist_ok=True)
     output_file = f"data/{lesson_name}.md"
     
